@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from itertools import permutations
-
 from linear_programming import solve as lp_solve
 
 
@@ -183,5 +182,77 @@ def main():
     simulate_game(preferences, n_rounds=10)
 
 
+def simulate_and_check_cycles(
+        preferences: dict[tuple[int, int], int],
+        n_students: int = 5,
+        n_topics: int = 3,
+        max_rounds: int = 50
+) -> str:
+    """
+    Simulates the preference manipulation game and checks for cycles or stabilization in preferences.
+
+    Args:
+        preferences: Initial preference dictionary mapping (student_id, topic_id) to dissatisfaction value.
+        n_students: Number of students in the simulation.
+        n_topics: Number of topics in the simulation.
+        max_rounds: Maximum number of rounds to simulate before concluding insufficient steps.
+
+    Returns:
+        A string indicating one of three outcomes:
+        - "Cycle detected in preferences"
+        - "Preferences stabilized"
+        - "Insufficient rounds to determine outcome"
+    """
+    # Initialize game state
+    gs = GameState(
+        solver=LPSolver(),
+        preferences=Preferences(preferences, n_students),
+        declared_preferences=Preferences(dict(preferences), n_students),
+        n_topics=n_topics,
+        n_students=n_students,
+    )
+
+    manipulator = Manipulator()
+    seen_configurations: dict[str, int] = {}
+    last_few_configs: list[str] = []
+    stabilization_threshold = 3  # Number of rounds with same config to consider stabilized
+
+    for round_num in range(max_rounds):
+        # Convert current preferences to a string for comparison
+        current_config = str(sorted(gs.declared_preferences.preferences.items()))
+
+        # Check for cycles
+        if current_config in seen_configurations:
+            return "Cycle detected in preferences"
+        seen_configurations[current_config] = round_num
+
+        # Track last few configurations for stabilization check
+        last_few_configs.append(current_config)
+        if len(last_few_configs) > stabilization_threshold:
+            last_few_configs.pop(0)
+            if len(set(last_few_configs)) == 1:  # All recent configs are the same
+                return "Preferences stabilized"
+
+        # Simulate one round of manipulation for all students
+        changes_made = False
+        for student_id in range(n_students):
+            if manipulator.manipulate(gs, student_id):
+                changes_made = True
+
+        # If no changes were made in this round, check if it's stable
+        if not changes_made and len(set(last_few_configs)) == 1:
+            return "Preferences stabilized"
+
+    return "Insufficient rounds to determine outcome"
+
+
 if __name__ == "__main__":
-    main()
+    preferences = {
+        (0, 0): 1, (0, 1): 2, (0, 2): 3,
+        (1, 0): 3, (1, 1): 1, (1, 2): 2,
+        (2, 0): 2, (2, 1): 1, (2, 2): 3,
+        (3, 0): 1, (3, 1): 3, (3, 2): 2,
+        (4, 0): 1, (4, 1): 2, (4, 2): 3,
+    }
+    result = simulate_and_check_cycles(preferences)
+    print(result)
