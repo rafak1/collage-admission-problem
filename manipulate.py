@@ -1,7 +1,10 @@
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from itertools import permutations
-from linear_programming import solve as lp_solve
+
+from sum.linear_programming import solve as lp_solve
+from utils import generate_random_preferences
 
 
 @dataclass
@@ -44,6 +47,14 @@ class GameState:
 
 
 class Manipulator(ABC):
+    def __init__(self, log_file=None):
+        super().__init__()
+        self.log_file = log_file
+    
+    def print(self, msg):
+        if self.log_file is not None:
+            print(msg, file=self.log_file)
+    
     def manipulate(self, gs: GameState, student_id):
         possible_preferences = get_possible_student_preferences(gs.n_topics)
 
@@ -77,33 +88,34 @@ class Manipulator(ABC):
                 bsd = sd
                 bpreference = preference
 
-        with open("changes.txt", mode="a") as f:
-            if bpreference is not None:
-                print(f"Student {student_id} changed declaration", file=f)
-                current_assignment = assign_students(
-                    gs.declared_preferences.preferences)
-                dissatisfaction = gs.preferences.total_dissatisfaction(
-                    current_assignment)
-                sds = [gs.preferences.student_dissatisfaction(
-                    current_assignment, sid) for sid in range(gs.n_students)]
-                print(
-                    f"Dissatisfaction before: total = {dissatisfaction}, students: {sds}", file=f)
-                gs.declared_preferences.preferences = gs.declared_preferences.updated_preferences(
-                    bpreference,
-                    student_id,
-                )
-                current_assignment = assign_students(
-                    gs.declared_preferences.preferences)
-                dissatisfaction = gs.preferences.total_dissatisfaction(
-                    current_assignment)
-                sds = [gs.preferences.student_dissatisfaction(
-                    current_assignment, sid) for sid in range(gs.n_students)]
-                print(
-                    f"Dissatisfaction after change: total = {dissatisfaction}, student: {sds}", file=f)
-                print("New declarations:", file=f)
-                save_preferences_table(gs.declared_preferences.preferences, f)
+        if bpreference is not None:
+            self.print(f"Student {student_id} changed declaration")
+            current_assignment = assign_students(
+                gs.declared_preferences.preferences)
+            dissatisfaction = gs.preferences.total_dissatisfaction(
+                current_assignment)
+            sds = [gs.preferences.student_dissatisfaction(
+                current_assignment, sid) for sid in range(gs.n_students)]
+            self.print(
+                f"Dissatisfaction before: total = {dissatisfaction}, students: {sds}")
+            gs.declared_preferences.preferences = gs.declared_preferences.updated_preferences(
+                bpreference,
+                student_id,
+            )
+            current_assignment = assign_students(
+                gs.declared_preferences.preferences)
+            dissatisfaction = gs.preferences.total_dissatisfaction(
+                current_assignment)
+            sds = [gs.preferences.student_dissatisfaction(
+                current_assignment, sid) for sid in range(gs.n_students)]
+            self.print(
+                f"Dissatisfaction after change: total = {dissatisfaction}, student: {sds}")
+            self.print("New declarations:")
+            
+            if self.log_file is not None:
+                save_preferences_table(gs.declared_preferences.preferences, f=self.log_file)
 
-                print("------", file=f)
+            self.print("------")
 
 
 class LPSolver(AssignmentSolver):
@@ -112,10 +124,7 @@ class LPSolver(AssignmentSolver):
         return assignment
 
 
-def simulate_game(preferences: dict[tuple[int, int], int], n_rounds: int = 10):
-    n_students = 5
-    n_topics = 3
-
+def initialize_game(preferences, n_students, n_topics) -> GameState:
     gs = GameState(
         solver=LPSolver(),
         preferences=Preferences(preferences, n_students),
@@ -124,14 +133,46 @@ def simulate_game(preferences: dict[tuple[int, int], int], n_rounds: int = 10):
         n_students=n_students,
     )
 
-    manipulator = Manipulator()
-    for r in range(n_rounds):
-        with open("changes.txt", mode="a") as f:
-            print(f"Round: {r}", file=f)
-            print("------", file=f)
+    return gs
 
-        for s_id in range(n_students):
+
+def simulate_game(gs: GameState, log_file, n_rounds: int = 10):
+    manipulator = Manipulator(log_file=log_file)
+    for r in range(n_rounds):
+        print(f"Round: {r}", file=log_file)
+        print("------", file=log_file)
+
+        for s_id in range(gs.n_students):
             manipulator.manipulate(gs, s_id)
+
+
+def is_stable_to_swaps(gs: GameState, log_file):
+    assignment = gs.solver.solve(
+        gs.n_students,
+        gs.n_topics,
+        gs.declared_preferences.preferences
+    )
+
+    students_dissatistactions = [gs.preferences.student_dissatisfaction(
+        assignment, i) for i in range(gs.n_students)]
+
+    for s1 in range(gs.n_students):
+        for s2 in range(s1 + 1, gs.n_students):
+            new_assignment = assignment.copy()
+            new_assignment[s1], new_assignment[s2] = assignment[s2], assignment[s1]
+
+            new_diss1 = gs.preferences.student_dissatisfaction(
+                new_assignment, s1)
+            new_diss2 = gs.preferences.student_dissatisfaction(
+                new_assignment, s2)
+            prev_diss1, prev_diss2 = students_dissatistactions[s1], students_dissatistactions[s2]
+
+            if (new_diss1 < prev_diss1 and new_diss2 <= prev_diss2) or (new_diss1 == prev_diss1 and new_diss2 < prev_diss2):
+                print(f"Before {students_dissatistactions}, students swapped: {s1}, {s2}", file=log_file)
+                print(f"Prev assignment: {assignment}, new one: {new_assignment}", file=log_file)
+                return False
+
+    return True
 
 
 def save_preferences_table(preferences, f):
@@ -159,6 +200,36 @@ def save_preferences_table(preferences, f):
         f.write(format_row(row) + "\n")
 
 
+def test_stability():
+    n_students = 7
+    n_topics = 4
+    
+    stability_filename = f"stability_students={n_students},topics={n_topics}.txt"
+    if os.path.exists(stability_filename):
+        os.remove(stability_filename)
+
+    for i in range(100):
+        preferences = generate_random_preferences(n_students, n_topics)
+
+        changes_dir = f"changes_students={n_students},topics={n_topics}"
+        os.makedirs(changes_dir, exist_ok=True)
+        log_filename = f"{changes_dir}/{i}.txt"
+        if os.path.exists(log_filename):
+            os.remove(log_filename)
+        with open(log_filename, mode="w") as f:
+            print("Real preferences:", file=f)
+            save_preferences_table(preferences, f)
+
+            gs = initialize_game(preferences, n_students, n_topics)
+            simulate_game(gs, f, n_rounds=10)
+
+            with open(stability_filename, "a") as stable_file:
+                is_stable = is_stable_to_swaps(gs, stable_file)
+                stable_file.write(f"Stable to topic swaps? {is_stable}\n")
+
+            print("Stable to topic swaps?", is_stable)
+
+
 def main():
     # preferences = {
     #     (0, 0): 1, (0, 1): 2, (0, 2): 3,
@@ -169,17 +240,15 @@ def main():
     # }
     # simulate_game(preferences, n_rounds=2)
 
-    preferences = {
-        (0, 0): 1, (0, 1): 2, (0, 2): 3,
-        (1, 0): 3, (1, 1): 1, (1, 2): 2,
-        (2, 0): 2, (2, 1): 1, (2, 2): 3,
-        (3, 0): 1, (3, 1): 3, (3, 2): 2,
-        (4, 0): 1, (4, 1): 2, (4, 2): 3,
-    }
-    with open("changes.txt", mode="w") as f:
-        print("Real preferences:", file=f)
-        save_preferences_table(preferences, f)
-    simulate_game(preferences, n_rounds=10)
+    # preferences = {
+    #     (0, 0): 1, (0, 1): 2, (0, 2): 3,
+    #     (1, 0): 3, (1, 1): 1, (1, 2): 2,
+    #     (2, 0): 2, (2, 1): 1, (2, 2): 3,
+    #     (3, 0): 1, (3, 1): 3, (3, 2): 2,
+    #     (4, 0): 1, (4, 1): 2, (4, 2): 3,
+    # }
+
+    test_stability()
 
 
 def simulate_and_check_cycles(
@@ -215,11 +284,13 @@ def simulate_and_check_cycles(
     manipulator = Manipulator()
     seen_configurations: dict[str, int] = {}
     last_few_configs: list[str] = []
-    stabilization_threshold = 3  # Number of rounds with same config to consider stabilized
+    # Number of rounds with same config to consider stabilized
+    stabilization_threshold = 3
 
     for round_num in range(max_rounds):
         # Convert current preferences to a string for comparison
-        current_config = str(sorted(gs.declared_preferences.preferences.items()))
+        current_config = str(
+            sorted(gs.declared_preferences.preferences.items()))
 
         # Check for cycles
         if current_config in seen_configurations:
@@ -247,12 +318,13 @@ def simulate_and_check_cycles(
 
 
 if __name__ == "__main__":
-    preferences = {
-        (0, 0): 1, (0, 1): 2, (0, 2): 3,
-        (1, 0): 3, (1, 1): 1, (1, 2): 2,
-        (2, 0): 2, (2, 1): 1, (2, 2): 3,
-        (3, 0): 1, (3, 1): 3, (3, 2): 2,
-        (4, 0): 1, (4, 1): 2, (4, 2): 3,
-    }
-    result = simulate_and_check_cycles(preferences)
-    print(result)
+    main()
+    # preferences = {
+    #     (0, 0): 1, (0, 1): 2, (0, 2): 3,
+    #     (1, 0): 3, (1, 1): 1, (1, 2): 2,
+    #     (2, 0): 2, (2, 1): 1, (2, 2): 3,
+    #     (3, 0): 1, (3, 1): 3, (3, 2): 2,
+    #     (4, 0): 1, (4, 1): 2, (4, 2): 3,
+    # }
+    # result = simulate_and_check_cycles(preferences)
+    # print(result)

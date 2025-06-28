@@ -1,8 +1,8 @@
-import brut
-import linear_programming
+from sum import linear_programming
 import random
 import copy
-import biparte_graph
+from sum import biparte_graph
+from utils import generate_random_preferences
 
 tries = 100
 
@@ -10,12 +10,7 @@ for i in range(tries):
     n_topics = random.randint(1, 5)
     n_students = random.randint(n_topics, 2 * n_topics)
 
-    preferences = {}
-    for i in range(n_students):
-        perm = list(range(1, n_topics + 1))
-        random.shuffle(perm)
-        for j in range(n_topics):
-            preferences[(i, j)] = perm[j]
+    preferences = generate_random_preferences(n_students, n_topics)
     
     result1, dissatisfaction1 = linear_programming.solve(n_students, n_topics, copy.deepcopy(preferences))
     result2, dissatisfaction2 = biparte_graph.solve(n_students, n_topics, copy.deepcopy(preferences))
@@ -30,3 +25,4 @@ for i in range(tries):
         break
 
     print("noice")
+    
