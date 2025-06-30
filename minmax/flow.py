@@ -5,9 +5,8 @@ def solve_with_flow(n_students, n_topics, preferences):
     cost_matrix = [[0] * (2 * n_topics) for _ in range(n_students)]
     for i in range(n_students):
         for j in range(n_topics):
-            base_cost = preferences[i, j]
-            cost_matrix[i][j] = base_cost  # slot 0
-            cost_matrix[i][n_topics + j] = base_cost + n_topics  # slot 1, slightly worse to break ties
+            cost_matrix[i][j] =  preferences[i, j]
+            cost_matrix[i][n_topics + j] = preferences[i, j]
 
     def is_feasible(threshold):
         G = nx.DiGraph()
@@ -21,6 +20,8 @@ def solve_with_flow(n_students, n_topics, preferences):
             G.add_edge(source, s, capacity=1)
 
         # Students to slots (only if under threshold)
+        #print(f"Threshold: {threshold}")
+        #print(f"Cost matrix: {cost_matrix}")
         for i, s in enumerate(students):
             for j, slot in enumerate(slots):
                 if cost_matrix[i][j] <= threshold:
@@ -34,14 +35,14 @@ def solve_with_flow(n_students, n_topics, preferences):
         # Topics to sink with lower bounds (min 1 student per topic)
         demand = {}
         for t in topics:
-            G.add_edge(t, sink, capacity=2)
+            G.add_edge(t, sink, capacity= 2 - 1)
             demand[t] = 1  # min 1 flow required
         for s in slots:
             demand[s] = 0
         for s in students:
-            demand[s] = -1
-        demand[source] = n_students
-        demand[sink] = -n_topics
+            demand[s] = 0
+        demand[source] = - n_students
+        demand[sink] = n_students - n_topics
 
         super_source, super_sink = "SS", "TT"
         G.add_node(super_source)
@@ -50,16 +51,15 @@ def solve_with_flow(n_students, n_topics, preferences):
 
         for node, d in demand.items():
             if d > 0:
-                G.add_edge(super_source, node, capacity=d)
+                G.add_edge(node, super_sink, capacity=d)
                 total_demand += d
             elif d < 0:
-                G.add_edge(node, super_sink, capacity=-d)
+                G.add_edge(super_source, node, capacity=-d)
 
-        G.add_edge(sink, source, capacity=n_students)  # circulation
         flow_val, flow_dict = nx.maximum_flow(G, super_source, super_sink)
 
         # extract the assignments
-        #print(flow_dict)
+        print(G.edges(data=True))
         result = [-1] * n_students
         for i, s in enumerate(students):
             if s in flow_dict:
@@ -74,19 +74,22 @@ def solve_with_flow(n_students, n_topics, preferences):
         return flow_val == total_demand, result
 
     # Binary search over dissatisfaction threshold
-    low, high = 0, max(preferences.values()) + n_topics
+    low, high = 0, max(preferences.values()) + 1
     answer = -1
     print(f"start {low} high {high}")
     while low <= high:
+        if low == high:
+            answer = low
+            break
         mid = (low + high) // 2
         print(f"Checking feasibility for threshold: {mid}")
         feasible, assigments = is_feasible(mid)
         if feasible:
-            print(f"Feasible for threshold: {mid}")
+            print(f"Feasible for threshold: {mid}; low: {low}, high: {high}")
             answer = mid
             high = mid - 1
         else:
-            print(f"Not feasible for threshold: {mid}")
+            print(f"Not feasible for threshold: {mid}; low: {low}, high: {high}")
             low = mid + 1
 
     _, assigments = is_feasible(answer)
@@ -104,12 +107,12 @@ if __name__ == "__main__":
         (4, 0): 2, (4, 1): 3, (4, 2): 1,
     }
 
-    n_students = 2
-    n_topics = 2
-    preferences = {
-        (0, 0): 1, (0, 1): 2,
-        (1, 0): 2, (1, 1): 1,
-    }
+    #n_students = 2
+    #n_topics = 2
+    #preferences = {
+    #    (0, 0): 1, (0, 1): 2,
+    #    (1, 0): 2, (1, 1): 1,
+    #}
 
     dissatisfaction, assigments = solve_with_flow(n_students, n_topics, preferences)
     print(f"Minimum dissatisfaction: {dissatisfaction}")
