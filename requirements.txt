@@ -1,2 +1,6 @@
-pulp
+pulp~=3.2.1
 scikit-learn
+numpy~=2.2.6
+scipy~=1.15.3
+networkx~=3.5
+matplotlib~=3.10.3
